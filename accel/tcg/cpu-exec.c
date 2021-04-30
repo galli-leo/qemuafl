@@ -357,8 +357,8 @@ bool afl_parse_ranges(char* str, struct vmrange** list, bool excluded) {
   return have_names;
 }
 
-void afl_print_ranges(struct vmrange* list, char* prefix) {
-  if (!list) return;
+void afl_print_ranges(struct vmrange* list, const char* prefix) {
+  // if (!list) return;
 
   struct vmrange* n = list;
   while (n) {
@@ -451,16 +451,16 @@ void afl_setup(void) {
   if (afl_instr_data) {
       if (afl_area_ptr) {
         struct vmrange* shm_range = calloc(1, sizeof(struct vmrange));
-        shm_range->start = afl_area_ptr;
-        shm_range->end = afl_area_ptr + MAP_SIZE;
+        shm_range->start = (target_ulong)afl_area_ptr;
+        shm_range->end = (target_ulong)afl_area_ptr + MAP_SIZE;
         shm_range->next = afl_instr_data;
         afl_instr_data = shm_range;
       }
 
       if (__afl_cmp_map) {
           struct vmrange* shm_range = calloc(1, sizeof(struct vmrange));
-        shm_range->start = __afl_cmp_map;
-        shm_range->end = __afl_cmp_map + sizeof(*__afl_cmp_map);
+        shm_range->start = (target_ulong)__afl_cmp_map;
+        shm_range->end = (target_ulong)__afl_cmp_map + sizeof(*__afl_cmp_map);
         shm_range->next = afl_instr_data;
         afl_instr_data = shm_range;
       }
@@ -501,9 +501,9 @@ void afl_setup(void) {
     free_self_maps(map_info);
   }
 
-  if (getenv("AFL_DEBUG")) {
+  if (getenv("AFL_DEBUG") || true) {
     afl_print_ranges(afl_instr_code, "Instrument");
-    afl_print_ranges(afl_instr_data, "Snapshot")
+    afl_print_ranges(afl_instr_data, "Snapshot");
   }
 
   /* Maintain for compatibility */

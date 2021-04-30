@@ -116,6 +116,8 @@ extern __thread abi_ulong afl_prev_loc;
 
 extern struct cmp_map *__afl_cmp_map;
 
+bool afl_parse_ranges(char* str, struct vmrange** list, bool excluded);
+void afl_print_ranges(struct vmrange* list, const char* prefix);
 void afl_setup(void);
 void afl_forkserver(CPUState *cpu);
 void afl_persistent_iter(CPUArchState *env);
