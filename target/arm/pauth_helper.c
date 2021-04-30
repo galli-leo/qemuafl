@@ -411,6 +411,7 @@ static void pauth_check_trap(CPUARMState *env, int el, uintptr_t ra)
 
 static bool pauth_key_enabled(CPUARMState *env, int el, uint32_t bit)
 {
+    return false;
     return (arm_sctlr(env, el) & bit) != 0;
 }
 
