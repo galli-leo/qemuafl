@@ -76,6 +76,7 @@ abi_ulong afl_entry_point,                      /* ELF entry point (_start) */
     afl_end_code;                               /* .text end pointer        */
 
 struct vmrange* afl_instr_code;
+struct vmrange* afl_instr_data;
 
 abi_ulong    afl_persistent_addr, afl_persistent_ret_addr;
 unsigned int afl_persistent_cnt;
@@ -213,6 +214,15 @@ static void collect_memory_snapshot(void) {
     if (page_check_range(h2g(min), max - min, flags) == -1)
         continue;
 
+    uint64_t guest_min, guest_max;
+    guest_min = h2g(min);
+    guest_max = h2g(max);
+
+    if (!afl_must_save_data(guest_min) || !afl_must_save_data(guest_max-1))
+    {
+      continue;
+    }
+
     if (lkm_snapshot) {
     
       afl_snapshot_include_vmrange((void*)min, (void*)max);
@@ -310,6 +320,63 @@ static void afl_map_shm_fuzz(void) {
 
 }
 
+bool afl_parse_ranges(char* str, struct vmrange** list, bool excluded) {
+  bool have_names = false;
+  if (str) {
+    char *saveptr1, *saveptr2 = NULL;
+    char *pt1, *pt2, *pt3 = NULL;
+    
+    while (1) {
+
+      pt1 = strtok_r(str, ",", &saveptr1);
+      if (pt1 == NULL) break;
+      str = NULL;
+      
+      pt2 = strtok_r(pt1, "-", &saveptr2);
+      pt3 = strtok_r(NULL, "-", &saveptr2);
+      
+      struct vmrange* n = calloc(1, sizeof(struct vmrange));
+      n->exclude = excluded;
+      n->next = *list;
+
+      if (pt3 == NULL) { // filename
+        have_names = true;
+        n->start = (target_ulong)-1;
+        n->end = 0;
+        n->name = strdup(pt1);
+      } else {
+        n->start = strtoull(pt2, NULL, 16);
+        n->end = strtoull(pt3, NULL, 16);
+        n->name = NULL;
+      }
+      
+      *list = n;
+    }
+  }
+
+  return have_names;
+}
+
+void afl_print_ranges(struct vmrange* list, char* prefix) {
+  if (!list) return;
+
+  struct vmrange* n = list;
+  while (n) {
+    if (n->exclude) {
+      fprintf(stderr, "%s Exclude range: 0x%lx-0x%lx (%s)\n",
+              prefix,
+              (unsigned long)n->start, (unsigned long)n->end,
+              n->name ? n->name : "<noname>");
+    } else {
+      fprintf(stderr, "%s Include range: 0x%lx-0x%lx (%s)\n",
+              prefix,
+              (unsigned long)n->start, (unsigned long)n->end,
+              n->name ? n->name : "<noname>");
+    }
+    n = n->next;
+  }
+}
+
 void afl_setup(void) {
 
   char *id_str = getenv(SHM_ENV_VAR), *inst_r = getenv("AFL_INST_RATIO");
@@ -373,72 +440,30 @@ void afl_setup(void) {
   if (getenv("AFL_CODE_END"))
     afl_end_code = strtoll(getenv("AFL_CODE_END"), NULL, 16);
 
-  int have_names = 0;
-  if (getenv("AFL_QEMU_INST_RANGES")) {
-    char *str = getenv("AFL_QEMU_INST_RANGES");
-    char *saveptr1, *saveptr2 = NULL;
-    char *pt1, *pt2, *pt3 = NULL;
-    
-    while (1) {
+  bool have_names = false;
+  have_names |= afl_parse_ranges(getenv("AFL_QEMU_INST_RANGES"), &afl_instr_code, false);
+  have_names |= afl_parse_ranges(getenv("AFL_QEMU_EXCLUDE_RANGES"), &afl_instr_code, true);
+  have_names |= afl_parse_ranges(getenv("AFL_QEMU_DATA_RANGES"), &afl_instr_data, false);
+  have_names |= afl_parse_ranges(getenv("AFL_QEMU_DATA_EXCL_RANGES"), &afl_instr_data, true);
 
-      pt1 = strtok_r(str, ",", &saveptr1);
-      if (pt1 == NULL) break;
-      str = NULL;
-      
-      pt2 = strtok_r(pt1, "-", &saveptr2);
-      pt3 = strtok_r(NULL, "-", &saveptr2);
-      
-      struct vmrange* n = calloc(1, sizeof(struct vmrange));
-      n->next = afl_instr_code;
-
-      if (pt3 == NULL) { // filename
-        have_names = 1;
-        n->start = (target_ulong)-1;
-        n->end = 0;
-        n->name = strdup(pt1);
-      } else {
-        n->start = strtoull(pt2, NULL, 16);
-        n->end = strtoull(pt3, NULL, 16);
-        n->name = NULL;
-      }
-      
-      afl_instr_code = n;
-
-    }
-  }
-
-  if (getenv("AFL_QEMU_EXCLUDE_RANGES")) {
-    char *str = getenv("AFL_QEMU_EXCLUDE_RANGES");
-    char *saveptr1, *saveptr2 = NULL;
-    char *pt1, *pt2, *pt3 = NULL;
-
-    while (1) {
-
-      pt1 = strtok_r(str, ",", &saveptr1);
-      if (pt1 == NULL) break;
-      str = NULL;
-
-      pt2 = strtok_r(pt1, "-", &saveptr2);
-      pt3 = strtok_r(NULL, "-", &saveptr2);
-
-      struct vmrange* n = calloc(1, sizeof(struct vmrange));
-      n->exclude = true; // These are "exclusion" regions.
-      n->next = afl_instr_code;
-
-      if (pt3 == NULL) { // filename
-        have_names = 1;
-        n->start = (target_ulong)-1;
-        n->end = 0;
-        n->name = strdup(pt1);
-      } else {
-        n->start = strtoull(pt2, NULL, 16);
-        n->end = strtoull(pt3, NULL, 16);
-        n->name = NULL;
+  // If we have some include ranges, then we add the shared memory region as well.
+  // Otherwise, coverage would change!
+  if (afl_instr_data) {
+      if (afl_area_ptr) {
+        struct vmrange* shm_range = calloc(1, sizeof(struct vmrange));
+        shm_range->start = afl_area_ptr;
+        shm_range->end = afl_area_ptr + MAP_SIZE;
+        shm_range->next = afl_instr_data;
+        afl_instr_data = shm_range;
       }
 
-      afl_instr_code = n;
-
-    }
+      if (__afl_cmp_map) {
+          struct vmrange* shm_range = calloc(1, sizeof(struct vmrange));
+        shm_range->start = __afl_cmp_map;
+        shm_range->end = __afl_cmp_map + sizeof(*__afl_cmp_map);
+        shm_range->next = afl_instr_data;
+        afl_instr_data = shm_range;
+      }
   }
 
   if (have_names) {
@@ -476,20 +501,9 @@ void afl_setup(void) {
     free_self_maps(map_info);
   }
 
-  if (getenv("AFL_DEBUG") && afl_instr_code) {
-    struct vmrange* n = afl_instr_code;
-    while (n) {
-      if (n->exclude) {
-        fprintf(stderr, "Exclude range: 0x%lx-0x%lx (%s)\n",
-                (unsigned long)n->start, (unsigned long)n->end,
-                n->name ? n->name : "<noname>");
-      } else {
-        fprintf(stderr, "Instrument range: 0x%lx-0x%lx (%s)\n",
-                (unsigned long)n->start, (unsigned long)n->end,
-                n->name ? n->name : "<noname>");
-      }
-      n = n->next;
-    }
+  if (getenv("AFL_DEBUG")) {
+    afl_print_ranges(afl_instr_code, "Instrument");
+    afl_print_ranges(afl_instr_data, "Snapshot")
   }
 
   /* Maintain for compatibility */

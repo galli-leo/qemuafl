@@ -86,6 +86,7 @@ struct vmrange {
 };
 
 extern struct vmrange* afl_instr_code;
+extern struct vmrange* afl_instr_data;
 extern unsigned char  *afl_area_ptr;
 extern unsigned int    afl_inst_rms;
 extern abi_ulong       afl_entry_point, afl_start_code, afl_end_code;
@@ -177,6 +178,27 @@ static inline int afl_must_instrument(target_ulong addr) {
     return 1;
 
   for (struct vmrange* n = afl_instr_code; n; n = n->next) {
+    if (!n->exclude && addr < n->end && addr >= n->start)
+      return 1;
+  }
+
+  return 0;
+
+}
+
+static inline int afl_must_save_data(target_ulong addr) {
+  if (!afl_instr_data) return 1;
+  // Reject any exclusion regions
+  for (struct vmrange* n = afl_instr_data; n; n = n->next) {
+    if (n->exclude && addr < n->end && addr >= n->start)
+      return 0;
+  }
+
+  // Check for inclusion in instrumentation regions
+  if (addr < afl_end_code && addr >= afl_start_code)
+    return 1;
+
+  for (struct vmrange* n = afl_instr_data; n; n = n->next) {
     if (!n->exclude && addr < n->end && addr >= n->start)
       return 1;
   }
