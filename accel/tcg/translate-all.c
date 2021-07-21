@@ -67,6 +67,9 @@
 #include "tcg/tcg-op.h"
 
 __thread int cur_block_is_good;
+bool did_alloc_globals;
+TCGTemp* prev_loc;
+// TCGTemp* afl_map_ptr;
 
 void HELPER(afl_maybe_log)(target_ulong cur_loc) {
 
@@ -76,15 +79,23 @@ void HELPER(afl_maybe_log)(target_ulong cur_loc) {
 
   afl_prev_loc = cur_loc >> 1;
 
+// printf("%p\n", (void*)cur_loc);
+    // unsigned char map_val = afl_area_ptr[cur_loc];
+    // printf("%p: %x\n", (void*)cur_loc, map_val);
+
+    // printf("curr_loc: %p, afl_prev_loc: %p\n", (void*)cur_loc, (void*)prev_loc->val);
+
 }
 
 /* Generates TCG code for AFL's tracing instrumentation. */
-static void afl_gen_trace(target_ulong cur_loc) {
+static void afl_gen_trace(target_ulong cur_loc, TCGContext* ctx) {
 
   /* Optimize for cur_loc > afl_end_code, which is the most likely case on
      Linux systems. */
+// fprintf(stderr, "Checking to make sure: %p\n", (void*)cur_loc);
 
   cur_block_is_good = afl_must_instrument(cur_loc);
+//   cur_block_is_good = 1;
 
   if (!cur_block_is_good)
     return;
@@ -98,12 +109,53 @@ static void afl_gen_trace(target_ulong cur_loc) {
 
   /* Implement probabilistic instrumentation by looking at scrambled block
      address. This keeps the instrumented locations stable across runs. */
-
+//   printf("cur_loc: %d, afl_inst_rms: %d\n", cur_loc, afl_inst_rms);
   if (cur_loc >= afl_inst_rms) return;
 
-  TCGv cur_loc_v = tcg_const_tl(cur_loc);
+TCGv cur_loc_v = tcg_const_tl(cur_loc);
   gen_helper_afl_maybe_log(cur_loc_v);
   tcg_temp_free(cur_loc_v);
+  return;
+
+  if (!did_alloc_globals) {
+      prev_loc = tcg_global_alloc(ctx);
+      prev_loc->base_type = TCG_TYPE_I64;
+      prev_loc->type = TCG_TYPE_I64;
+      prev_loc->name = "afl_prev_loc";
+      did_alloc_globals = true;
+      TCGv_ptr prev_loc_ptr_2 = temp_tcgv_ptr(prev_loc);
+      tcg_global_mem_new(prev_loc_ptr_2, 0, "afl_prev_loc");
+  }
+
+//   TCGv_ptr prev_loc_ptr = temp_tcgv_ptr(prev_loc);
+ /*TCGv cur_loc_v = tcg_const_tl(cur_loc);
+  TCGv_ptr prev_loc_ptr = tcg_const_ptr(&afl_prev_loc);
+  TCGv prev_loc_v = tcg_temp_new_i64();//temp_tcgv_i64(prev_loc);
+  TCGv afl_idx_v = tcg_temp_new_i64();
+  TCGv_ptr afl_map_ptr = tcg_const_ptr(afl_area_ptr);
+  TCGv_ptr afl_map_off_ptr = tcg_temp_new_ptr();
+  TCGv afl_area_v = tcg_temp_new_i64();
+  tcg_gen_ld_i64(prev_loc_v, prev_loc_ptr, 0);
+  tcg_gen_xor_i64(afl_idx_v, cur_loc_v, prev_loc_v);
+//   gen_helper_afl_maybe_log(afl_idx_v);
+//   tcg_gen_ld_i64(afl_area_v, afl_map_ptr, afl_idx_v);
+  tcg_gen_trunc_i64_ptr(afl_map_off_ptr, afl_idx_v);
+  tcg_gen_add_ptr(afl_map_off_ptr, afl_map_off_ptr, afl_map_ptr);
+  tcg_gen_ld8u_i64(afl_area_v, afl_map_off_ptr, 0);
+  tcg_gen_addi_i64(afl_area_v, afl_area_v, 1);
+  tcg_gen_shri_i64(prev_loc_v, cur_loc_v, 1);
+  tcg_gen_st8_i64(afl_area_v, afl_map_off_ptr, 0);
+//   tcg_gen_mov_i64(prev_loc_v, cur_loc_v);
+  tcg_gen_st_i64(prev_loc_v, prev_loc_ptr, 0);
+  
+//   gen_helper_afl_maybe_log(afl_idx_v);
+  tcg_temp_free_ptr(prev_loc_ptr);
+  tcg_temp_free_ptr(afl_map_ptr);
+  tcg_temp_free(afl_area_v);
+  tcg_temp_free(afl_idx_v);
+  tcg_temp_free_ptr(afl_map_off_ptr);
+  tcg_temp_free(prev_loc_v);
+  tcg_temp_free(cur_loc_v);*/
 
 }
 
@@ -2054,7 +2106,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tcg_func_start(tcg_ctx);
 
     tcg_ctx->cpu = env_cpu(env);
-    afl_gen_trace(pc);
+    afl_gen_trace(pc, tcg_ctx);
     gen_intermediate_code(cpu, tb, max_insns);
     tcg_ctx->cpu = NULL;
     max_insns = tb->icount;

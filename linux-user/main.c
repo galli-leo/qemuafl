@@ -683,6 +683,18 @@ static int parse_args(int argc, char **argv)
     return optind;
 }
 
+// #define __USE_GNU
+#include <signal.h>
+#include <ucontext.h>
+void sig_handler(int signo, siginfo_t *si, void* arg);
+void sig_handler(int signo, siginfo_t *si, void* arg)
+{
+     ucontext_t *context = (ucontext_t*)arg;
+     mcontext_t *mcontext = &context->uc_mcontext;
+    printf("RECV SIGNAL @ %p, RIP: %p\n", si->si_addr, (void*)mcontext->gregs[REG_RIP]);
+    abort();
+}
+
 int main(int argc, char **argv, char **envp)
 {
     struct target_pt_regs regs1, *regs = &regs1;
@@ -700,6 +712,11 @@ int main(int argc, char **argv, char **envp)
     int execfd;
     int log_mask;
     unsigned long max_reserved_va;
+
+//     struct sigaction act = {0};
+// act.sa_sigaction = sig_handler;
+// act.sa_flags = SA_SIGINFO;
+// sigaction(SIGSEGV, &act, NULL);
 
     use_qasan = !!getenv("AFL_USE_QASAN");
 

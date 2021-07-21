@@ -377,6 +377,9 @@ void afl_print_ranges(struct vmrange* list, const char* prefix) {
   }
 }
 
+#include <signal.h>
+#include <ucontext.h>
+void sig_handler(int signo, siginfo_t *si, void* arg);
 void afl_setup(void) {
 
   char *id_str = getenv(SHM_ENV_VAR), *inst_r = getenv("AFL_INST_RATIO");
@@ -439,6 +442,8 @@ void afl_setup(void) {
     afl_start_code = strtoll(getenv("AFL_CODE_START"), NULL, 16);
   if (getenv("AFL_CODE_END"))
     afl_end_code = strtoll(getenv("AFL_CODE_END"), NULL, 16);
+
+  afl_instr_data = 0;
 
   bool have_names = false;
   have_names |= afl_parse_ranges(getenv("AFL_QEMU_INST_RANGES"), &afl_instr_code, false);
@@ -708,6 +713,10 @@ void afl_forkserver(CPUState *cpu) {
       if (!child_pid) {
 
         /* Child process. Close descriptors and run free. */
+//             struct sigaction act = {0};
+// act.sa_sigaction = sig_handler;
+// act.sa_flags = SA_SIGINFO;
+// sigaction(SIGSEGV, &act, NULL);
 
         afl_fork_child = 1;
         close(FORKSRV_FD);
@@ -978,7 +987,8 @@ static void afl_wait_tsl(CPUState *cpu, int fd) {
         mmap_unlock();
 
       } else {
-
+        fprintf(stdout,
+              "[AFL] INVALID PC: %p\n", (void*)t.tb.pc);
         invalid_pc = 1;
 
       }
@@ -1151,6 +1161,7 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
 #endif /* DEBUG_DISAS */
 
     qemu_thread_jit_execute();
+    // printf("Executing TB %p %p (%ld)\n", (void*)itb->pc, (void*)itb->tc.ptr, itb->tc.size);
     ret = tcg_qemu_tb_exec(env, tb_ptr);
     cpu->can_do_io = 1;
     /*

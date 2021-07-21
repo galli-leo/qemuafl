@@ -1714,7 +1714,7 @@ static inline void bswap_sym(struct elf_sym *sym) { }
 static inline void bswap_mips_abiflags(Mips_elf_abiflags_v0 *abiflags) { }
 #endif
 #endif
-
+#undef USE_ELF_CORE_DUMP
 #ifdef USE_ELF_CORE_DUMP
 static int elf_core_dump(int, const CPUArchState *);
 #endif /* USE_ELF_CORE_DUMP */

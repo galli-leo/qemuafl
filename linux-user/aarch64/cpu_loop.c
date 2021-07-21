@@ -144,6 +144,7 @@ void cpu_loop(CPUARMState *env)
                 info.si_code = TARGET_SEGV_MTESERR;
                 break;
             default:
+                printf("HMMMM: LR: %p, PC: %p/%p %d\n", (void*)env->xregs[29], (void*)env->pc, (void*)env->exception.vaddress, fsc);
                 g_assert_not_reached();
             }
 

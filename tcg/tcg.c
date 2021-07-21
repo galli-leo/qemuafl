@@ -1318,7 +1318,7 @@ static TCGTemp *tcg_temp_alloc(TCGContext *s)
     return memset(&s->temps[n], 0, sizeof(TCGTemp));
 }
 
-static TCGTemp *tcg_global_alloc(TCGContext *s)
+TCGTemp *tcg_global_alloc(TCGContext *s)
 {
     TCGTemp *ts;
 
